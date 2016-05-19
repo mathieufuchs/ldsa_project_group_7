@@ -1,0 +1,1 @@
+NA21144.chrom20.ILLUMINA.bwa.GIH.low_coverage.20130415.bam
