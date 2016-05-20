@@ -1,4 +1,4 @@
-import pysam, sys
+import pysam, os, sys
 from pyspark import SparkContext
 
 # produces all k-mers from sequence given k-mer length k
@@ -21,6 +21,7 @@ def extractSequences(fileName):
             if len(sequences) > 100: break
             sequences.append((r.query_sequence, r.reference_start))
 
+    os.remove(fileName+".bai")
     return sequences
 
 def getMax(a, b):
@@ -42,7 +43,7 @@ swiftUrl = "http://130.238.29.253:8080/swift/v1/1000-genomes-dataset/"
 usage = "usage: python ./genome.py kmers|heatmap"
 
 sc = SparkContext("local", "Genome")
-files = sc.textFile("shortIndex.txt").cache()
+files = sc.textFile("index.txt").cache()
 sequences = files.map(extractSequences).flatMap(lambda x: x)
 
 if len(sys.argv) < 2:
