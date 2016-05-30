@@ -1,31 +1,54 @@
-import pysam, sys, pickledb, os
-from pyspark import SparkContext
+import swiftclient.client, os
+import pysam, sys, pickledb, os, requests
+from pyspark import SparkContext, SparkConf
 from operator import add
+
+def swift_download(fileName):
+    
+    config = {'user': 'adri7263', 
+              'key': '',
+              'tenant_name': 'c2016015',
+              'authurl': 'http://130.238.29.253:5000/v2.0'}
+
+    obj = None
+
+    while True:
+        try:
+            conn = swiftclient.client.Connection(auth_version=2, **config)
+            response, obj = conn.get_object("1000-genomes-dataset", fileName)
+            break
+        except:
+            print("error: " + str(sys.exc_info()[0]))
+
+    with open(fileName, "wb") as f:
+        f.write(obj)
+
 
 # produces all k-mers from sequence given k-mer length k
 # returns a tuple on the form (id, [kmers...])
 def applyKMers(sequence, k):
     kMers = []
-    id = sequence[0]
-    seq = sequence[1]
-    pos = sequence[2]
+    seq = sequence[0]
+    pos = sequence[1]
     for i in range(0, len(seq) - k):
         kMers.append((seq[i: i+k], pos + i))
-    return (id, kMers)
+    return kMers
 
 # given a filename to a bam file, pysam is used to read and extract all sequences and their positions
 def extractSequences(fileName):
-    id = fileName[0:7]
     sequences = []
-    url = swiftUrl + fileName
-    with pysam.AlignmentFile(url, "rb") as samfile:
+    print("downloading " + fileName)
+    swift_download(fileName)
 
+    with pysam.AlignmentFile(fileName, "rb") as samfile:
+        
         for r in samfile.fetch(until_eof = True):
             if not r.is_unmapped: continue
-            if len(sequences) > 100: break
-            sequences.append((id, r.query_sequence, r.reference_start))
+            #if len(sequences) > 100: break
+            sequences.append((r.query_sequence, r.reference_start))
+            
+    os.remove(fileName)
 
-    os.remove(fileName+".bai")
     return sequences
 
 def getMax(a, b):
@@ -42,14 +65,15 @@ def findMaxPosition(sequences):
 sequences = []
 
 k = 10
-bins = 200.0
+bins = 256.0
 swiftUrl = "http://130.238.29.253:8080/swift/v1/1000-genomes-dataset/"
 usage = "usage: python ./genome.py kmers|heatmap"
 
-sc = SparkContext("local", "Genome")
+#conf = SparkConf().setMaster("spark://192.168.1.65:7077").setAppName("genom")
+#sc = SparkContext(conf=conf)
+sc = SparkContext("local", "genome")
 files = sc.textFile("index.txt").cache()
 sequences = files.map(extractSequences).flatMap(lambda x: x)
-print(sequences.collect())
 
 if len(sys.argv) < 2:
 
@@ -59,24 +83,14 @@ elif sys.argv[1] == "kmers":
 
     allKMers = sequences.flatMap(lambda seq: applyKMers(seq, k)).groupByKey()
     manyKMers = allKMers.filter(lambda x : len(x[1]) > 1).map(lambda x: (len(x[1]), x[0])).sortByKey()
-
     manyKMers.saveAsTextFile("outputKmers")
 
 elif sys.argv[1] == "heatmap":
 
-    maxPos = float(findMaxPosition(sequences))
+    #maxPos = float(findMaxPosition(sequences))
+    maxPos = 63000000
     sequences.map(lambda x: (int(round((x[1]/maxPos*float(bins)))), 1)).reduceByKey(add).sortByKey().saveAsTextFile("outputHeatmap")
 
 else:
+
     print(usage)
-
-#kMers = data.flatMap(lambda sequence: applyKMers(sequence, k))
-#kMerCounts = kMers.groupByKey().filter(lambda x: len(x[1]) > 1).map(lambda x: (x[0], list(x[1])))
-
-#print(sorted(kMers.collect(), key = lambda x: len(x[1])))
-
-#with pysam.AlignmentFile(samPath, "rb") as samfile:
-#    for r in samfile.fetch(until_eof=True):
-#        if not r.is_unmapped: continue
-#        if len(sequences) > 10: break
-#        sequences.append((r.query_sequence, r.reference_start))
