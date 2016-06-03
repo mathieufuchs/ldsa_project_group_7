@@ -1,28 +1,6 @@
-import swiftclient.client, os
 import pysam, sys, pickledb, os, requests
 from pyspark import SparkContext, SparkConf
 from operator import add
-
-def swift_download(fileName):
-    
-    config = {'user': 'adri7263', 
-              'key': '',
-              'tenant_name': 'c2016015',
-              'authurl': 'http://130.238.29.253:5000/v2.0'}
-
-    obj = None
-
-    while True:
-        try:
-            conn = swiftclient.client.Connection(auth_version=2, **config)
-            response, obj = conn.get_object("1000-genomes-dataset", fileName)
-            break
-        except:
-            print("error: " + str(sys.exc_info()[0]))
-
-    with open(fileName, "wb") as f:
-        f.write(obj)
-
 
 # produces all k-mers from sequence given k-mer length k
 # returns a tuple on the form (id, [kmers...])
@@ -36,18 +14,21 @@ def applyKMers(sequence, k):
 
 # given a filename to a bam file, pysam is used to read and extract all sequences and their positions
 def extractSequences(fileName):
-    sequences = []
     print("downloading " + fileName)
-    swift_download(fileName)
-
-    with pysam.AlignmentFile(fileName, "rb") as samfile:
-        
-        for r in samfile.fetch(until_eof = True):
-            if not r.is_unmapped: continue
-            #if len(sequences) > 100: break
-            sequences.append((r.query_sequence, r.reference_start))
+    url = swiftUrl + fileName
+    
+    while True:
+        try:
+            sequences = []
+            with pysam.AlignmentFile(url, "rb") as samfile:
+                for r in samfile.fetch(until_eof = True):
+                    if not r.is_unmapped: continue
+                    sequences.append((r.query_sequence, r.reference_start))
+            break
+        except:
+            print("error: " + str(sys.exc_info()[0]))
             
-    os.remove(fileName)
+    os.remove(fileName + ".bai")
 
     return sequences
 
@@ -88,7 +69,7 @@ elif sys.argv[1] == "kmers":
 elif sys.argv[1] == "heatmap":
 
     #maxPos = float(findMaxPosition(sequences))
-    maxPos = 63000000
+    maxPos = 63000000.0
     sequences.map(lambda x: (int(round((x[1]/maxPos*float(bins)))), 1)).reduceByKey(add).sortByKey().saveAsTextFile("outputHeatmap")
 
 else:
